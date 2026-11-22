@@ -212,6 +212,25 @@ any file a new extension added was silently never checked.
   so remove the entry in the same PR that adds an executed harness or direct GJS
   behavior test rather than leaving it behind
 
+## Compass extension validation
+
+`tests/test_compass_extensions.py` is the parallel gate for the second extension
+type in this monorepo. GNOME Shell extensions live under `extensions/`; Compass
+launcher extensions live under `compass-extensions/` and are **not** visited by
+the GNOME helpers. The module walks `compass-extensions/` at call time, so a new
+folder is covered without editing a list, and fails when it finds zero folders
+so the gate cannot pass vacuously.
+
+It enforces: a valid `package.json` manifest (required keys, slugged name equal
+to the folder, MIT license, `@vicinae/api` dependency), every declared command
+having a matching `src/<name>.ts(x)/js(x)` entrypoint, the declared icon existing
+under `assets/`, well-formed preferences (including dropdown defaults that are
+actually one of their values), every preference being read by some source, ESM
+sources without `eval`/`module.exports`, and no calls to `AI.ask()`/`AI.getModels()`
+(which throw "not implemented" in Compass). See
+[`Compass extension development`](compass-extension-dev.md) for the API facts
+behind those rules.
+
 ## Behavioural harnesses
 
 Node harnesses *run* the shipped desktop source under platform stubs:
