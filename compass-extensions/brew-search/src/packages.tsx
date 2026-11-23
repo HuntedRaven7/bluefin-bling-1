@@ -8,6 +8,7 @@ import {
 	runInTerminal,
 	showToast,
 	Toast,
+	type LaunchProps,
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
 import {
@@ -24,9 +25,11 @@ type Preferences = {
 	includeCasks: boolean;
 };
 
-export default function Packages() {
+export default function Packages(props: LaunchProps) {
 	const prefs = getPreferenceValues<Preferences>();
-	const [query, setQuery] = useState("");
+	// `compass cmd launch -q <text>` arrives as fallbackText; treating it as the
+	// initial search makes the command scriptable and testable.
+	const [query, setQuery] = useState(props.fallbackText || "");
 	const [packages, setPackages] = useState<BrewPackage[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);

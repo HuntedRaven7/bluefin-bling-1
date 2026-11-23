@@ -32,15 +32,18 @@ export async function loadPackageIndex(): Promise<PackageIndex> {
 		}
 	}
 
-	const [formulae, casks] = await Promise.all([
-		fetchJson("https://formulae.brew.sh/api/formula.json"),
-		fetchJson("https://formulae.brew.sh/api/cask.json"),
-	]);
+	// Fetch sequentially: holding both full JSON trees at once pushes a
+	// 160 MiB worker heap too hard. Parse and release each before the next.
+	const formulae = parseIndex(
+		await fetchJson("https://formulae.brew.sh/api/formula.json"),
+		"formula",
+	);
+	const casks = parseIndex(
+		await fetchJson("https://formulae.brew.sh/api/cask.json"),
+		"cask",
+	);
 
-	const index: PackageIndex = {
-		formulae: parseIndex(formulae, "formula"),
-		casks: parseIndex(casks, "cask"),
-	};
+	const index: PackageIndex = { formulae, casks };
 	cache.set(CACHE_KEY, JSON.stringify(index));
 	return index;
 }
