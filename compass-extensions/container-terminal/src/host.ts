@@ -26,7 +26,9 @@ export async function runHostScript(
 	// Bound the host work below the 10s poll deadline. Without this, a slow
 	// first podman start could outlive the timeout and recreate the output and
 	// done files after `finally` removed them, leaking temporary files.
-	const body = `timeout 8 /bin/sh -c ${shellQuote(build(output))}\nprintf 'done' > ${shellQuote(done)}`;
+	// The exit status goes into the done marker so a timeout (124, or 137 when
+	// `-k` has to SIGKILL) is reported instead of passing off partial output.
+	const body = `timeout -k 1 8 /bin/sh -c ${shellQuote(build(output))}\nprintf '%s' "$?" > ${shellQuote(done)}`;
 	await writeFile(
 		script,
 		`#!/bin/sh\nrm -f "$0"\nsetsid -f /bin/sh -c ${shellQuote(body)} >/dev/null 2>&1\n`,
@@ -37,13 +39,18 @@ export async function runHostScript(
 		await runInTerminal([script], { hold: false, title });
 		const deadline = Date.now() + TIMEOUT_MS;
 		while (Date.now() < deadline) {
+			let status: string;
 			try {
-				await readFile(done, "utf8");
-				return await readFile(output, "utf8");
+				status = (await readFile(done, "utf8")).trim();
 			} catch {
 				// The detached command has not finished yet.
+				await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+				continue;
 			}
-			await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+			if (status === "124" || status === "137") {
+				throw new Error(`Timed out waiting for ${title.toLowerCase()}`);
+			}
+			return await readFile(output, "utf8");
 		}
 		throw new Error(`Timed out waiting for ${title.toLowerCase()}`);
 	} finally {
