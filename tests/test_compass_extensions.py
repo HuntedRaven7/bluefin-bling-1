@@ -100,13 +100,16 @@ class TestCompassManifest(unittest.TestCase):
                     self.assertNotIn(name, names, f"duplicate command {name}")
                     names.add(name)
                     self.assertIn(command.get("mode"), {"view", "no-view", "menu-bar"})
-                    entrypoints = [
-                        ext / "src" / f"{name}{suffix}"
-                        for suffix in (".ts", ".tsx", ".js", ".jsx")
-                    ]
+                    # vici build only finds .tsx for view commands; a .ts view
+                    # command passes a loose gate and then fails to build.
+                    suffixes = (
+                        (".tsx",) if command.get("mode") == "view"
+                        else (".ts", ".tsx", ".js", ".jsx")
+                    )
+                    entrypoints = [ext / "src" / f"{name}{suffix}" for suffix in suffixes]
                     self.assertTrue(
                         any(path.is_file() for path in entrypoints),
-                        f"{ext.name}: no src/{name}.ts(x)/js(x) entrypoint",
+                        f"{ext.name}: no src/{name}{suffixes[0]} entrypoint",
                     )
 
     def test_every_declared_icon_exists(self):

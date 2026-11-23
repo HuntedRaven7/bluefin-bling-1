@@ -13,7 +13,7 @@ one self-contained extension with its own `package.json` manifest.
 | Folder | Command | What it does |
 |---|---|---|
 | `container-terminal/` | Open Container in Terminal | Search Podman, Docker, and Distrobox containers and open the selected one in Ghostty or a terminal of your choice. |
-| `brew-search/` | Search Brew Packages | Search Homebrew formulae and casks on the host and install the selected package. |
+| `brew-search/` | Search Brew Packages | Search formulae/casks through formulae.brew.sh and install the selection with host Homebrew. |
 | `ai-command/` | Ask AI | `/ai`-style prompt command with a selectable model and provider/source. |
 
 ## Develop

@@ -59,7 +59,10 @@ schema. The load-bearing rules:
 
 - `license` must be the literal `MIT`.
 - `name` is the slugged identifier and must equal the folder name.
-- Each `commands[].name` maps to `src/<name>.ts` or `src/<name>.tsx`.
+- Each `commands[].name` maps to `src/<name>.tsx` for `mode: "view"`
+  (`vici build` rejects a `.ts` view command with "Unable to find view
+  command"); `no-view` commands may use `.ts`. The validation gate enforces the
+  same distinction.
 - `icon` is a path under `assets/`; ship a real 512×512 PNG.
 - `preferences` and `commands[].preferences` share one namespace: a command
   preference with the same `name` overrides the extension-level one.
@@ -86,10 +89,15 @@ Raycast example:
   `showToast(Toast.Style.Success, title, message)` both work;
   `Toast.Style.Failure` exists.
 - `runInTerminal(argv, { hold, title, workingDirectory })` exists and goes
-  through the engine's `xdg-terminal-exec` support. It is the right choice for
-  "show the user a long-running command"; it does not let the extension pick a
-  specific emulator. To force a specific terminal, spawn it directly (see
-  below).
+  through the engine's `xdg-terminal-exec` support. Use it for every GUI or
+  host-side command. It does not select an emulator, so to honour a terminal
+  preference, write a small wrapper script into `environment.supportPath` whose
+  body is `exec <chosen-terminal> …`, then pass that script to `runInTerminal`.
+  The engine has the session environment; the worker does not.
+- Never `spawn()` a GUI program (terminal, browser, file manager) from the
+  worker even though `/bin/sh` is executable. The worker's environment has no
+  `DISPLAY`, `WAYLAND_DISPLAY`, or `XDG_RUNTIME_DIR`, so the program cannot find
+  the session.
 - `List.Item` accepts `keywords`, `icon` (including emoji strings), and
   `actions`. Avoid props you have not verified in `components/list.tsx`.
 
@@ -103,35 +111,51 @@ Each TypeScript worker runs behind Landlock:
 - Write: only its support and assets directories. Use `LocalStorage` or
   `environment.supportPath` for state. `/tmp` is private per extension via
   `TMPDIR`.
-- Execute: Node and system programs under `/usr`, `/bin`, `/lib`, `/app`. So a
-  worker can legitimately `spawnSync("podman", …)` or `spawnSync("brew", …)`.
-- Network is allowed. `fetch` works with the worker's proxy environment.
-- No session sockets are handed to the worker: D-Bus, Wayland, `XDG_RUNTIME_DIR`
-  and `COMPASS_SOCKET` are withheld. Doing GUI things requires the engine APIs
-  (`open`, `runInTerminal`, window-management), not direct socket access.
+- Execute: Node and system programs under `/usr`, `/bin`, `/lib`, `/app`.
+  **Programs under `$HOME` are not executable here.** Linuxbrew's
+  `/home/linuxbrew/.linuxbrew/bin/brew` is therefore unavailable to the worker.
+- Network is allowed. `fetch` works with the worker's proxy environment, so a
+  public JSON API is a better source for package search than a host CLI.
+- No session sockets or session environment are handed to the worker: D-Bus,
+  Wayland, `DISPLAY`, `XDG_RUNTIME_DIR` and `COMPASS_SOCKET` are withheld.
+  Rootless `podman`/`distrobox` need the runtime dir and container storage under
+  `$HOME`, so their CLI output from inside a worker is not reliable. Run host
+  tools through `runInTerminal` and read their output from a file in the
+  extension's support directory, or verify in a real Compass session before
+  relying on `spawnSync`.
+- GUI work must go through the engine APIs (`open`, `runInTerminal`,
+  window-management), never a directly spawned process.
 - Syscalls are filtered and memory is capped; avoid native addons and large
   buffers.
 
 ### Raycast shim overrides are a different mechanism
 
-`extensions/raycast-linux-overrides.json` in the Compass repo lists host
-programs that **Raycast-store** extensions may ask the engine to run (currently
-just `brew`, for `store.raycast.brew`). Native extensions in this repo do not go
-through that shim; they execute system programs directly inside the sandbox.
-Do not add entries there expecting a local extension to gain permissions.
+Compass has a host-command broker (`HostCommand/run`) that runs a program
+outside the extension sandbox after asking the person. It is reached through
+the Raycast compatibility shim's `child_process` patch and gated by
+`extensions/raycast-linux-overrides.json` in the Compass repo (currently only
+`brew`). `@vicinae/api` does not export a public wrapper for it, so native
+extensions in this repo cannot call it. Do not add entries to that manifest
+expecting a local extension to gain permissions; use `runInTerminal` instead.
 
 ## Conventions in this repo
 
 - **Terminal choice is a preference.** Keep the terminal launch template in a
-  single module per extension. `{command}` is replaced by a fully shell-quoted
-  command, then the result is run with `/bin/sh -c` in a detached child. Never
-  build a command string from unquoted container names or package names.
+  single pure module. `{command}` is replaced by a fully shell-quoted command,
+  which is written into a `exec …` wrapper script and handed to
+  `runInTerminal`. A compound shell command (for example `start && exec`) must
+  itself be quoted as one argument, otherwise the outer shell splits on `&&`.
+  Never build a command string from unquoted container or package names.
 - **Install commands go through `runInTerminal`,** so the user sees progress
   and can interact with prompts. The install argv is an array; no shell string
   interpolation.
-- **Runtimes are discovered, not assumed.** Probe `podman`, `docker`,
-  `distrobox`, and `brew` with `--version` before parsing their output, and
-  skip a failing runtime rather than failing the whole search.
+- **Search does not depend on host CLIs.** `brew-search` queries
+  formulae.brew.sh and caches a compact index with `Cache`; that works inside
+  the sandbox and fixes cask-only searches. Native container runtimes are
+  probed with `--version`, and a missing or failing one is skipped.
+- **Keep pure logic in separate modules.** Parsers and command builders should
+  not import `@vicinae/api`, so they can be exercised by the Node harnesses in
+  `tests/` without a running engine.
 - **No API keys in source.** Keys live in `password` preferences.
 - **No hardcoded extension lists.** README and tests discover folders.
 
@@ -144,10 +168,14 @@ python3 -m unittest discover -s tests -t tests -v
 python3 -m unittest discover -s tests -t tests -v -p 'test_compass_extensions.py'
 ```
 
-`tests/test_compass_extensions.py` checks manifests, entrypoints, icons,
-preference wiring (including dead preferences), ESM/no-`eval` sources, and that
-no extension calls the unimplemented `AI` APIs. It fails when zero extensions
-are discovered so the gate cannot pass vacuously.
+`tests/test_compass_extensions.py` checks manifests, entrypoints (view commands
+must be `.tsx`), icons, preference wiring (including dead preferences),
+ESM/no-`eval` sources, and that no extension calls the unimplemented `AI` APIs.
+It fails when zero extensions are discovered so the gate cannot pass vacuously.
+
+`tests/test_compass_logic.py` runs `tests/compass_logic.mjs` to exercise
+the pure parsers and command builders with real inputs. Add a scenario there
+whenever a parsing or quoting rule changes.
 
 A type check with the real SDK is a separate, optional step inside an extension
 folder (`npm install && npx tsc --noEmit`). CI does not install npm packages for

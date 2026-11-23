@@ -231,6 +231,15 @@ sources without `eval`/`module.exports`, and no calls to `AI.ask()`/`AI.getModel
 [`Compass extension development`](compass-extension-dev.md) for the API facts
 behind those rules.
 
+`tests/test_compass_logic.py` complements the structural gate with behaviour.
+It runs `tests/compass_logic.mjs` through Node, which imports the pure
+modules shipped in the extensions (no `@vicinae/api`, no engine): Distrobox row
+parsing with hex IDs and `ID | NAME | STATUS | IMAGE` columns, stopped-container
+command quoting so `&&` stays inside the terminal's single argument, cask-only
+searches that still return results, and provider-specific default models. Keep
+new parsers and command builders free of engine imports so they can be covered
+here.
+
 ## Behavioural harnesses
 
 Node harnesses *run* the shipped desktop source under platform stubs:

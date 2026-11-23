@@ -1,80 +1,79 @@
-import { spawnSync } from "node:child_process";
-
 export type PackageKind = "formula" | "cask";
 
 export type BrewPackage = {
 	name: string;
 	kind: PackageKind;
+	description: string;
+};
+
+export type IndexEntry = {
+	name: string;
+	description: string;
+};
+
+export type PackageIndex = {
+	formulae: IndexEntry[];
+	casks: IndexEntry[];
 };
 
 export type BrewOptions = {
-	brewPath: string;
 	includeFormulae: boolean;
 	includeCasks: boolean;
 };
 
-type BrewResult = { ok: true; stdout: string } | { ok: false; error: string };
+const MAX_RESULTS = 60;
 
-function runBrew(brewPath: string, args: string[]): BrewResult {
-	try {
-		const result = spawnSync(brewPath, args, {
-			encoding: "utf8",
-			timeout: 10000,
-			maxBuffer: 4 * 1024 * 1024,
-		});
-		if (result.error) return { ok: false, error: result.error.message };
-		if (result.status !== 0) {
-			const detail = (result.stderr || result.stdout || "").trim();
-			return { ok: false, error: detail || `brew exited with ${result.status}` };
-		}
-		return { ok: true, stdout: result.stdout ?? "" };
-	} catch (cause) {
-		return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+/**
+ * Homebrew's public API uses `name` for formulae and `token` for casks.
+ * Keep only what search needs so the cached index stays small.
+ */
+export function parseIndex(
+	payload: unknown,
+	kind: PackageKind,
+): IndexEntry[] {
+	if (!Array.isArray(payload)) return [];
+	const nameKey = kind === "cask" ? "token" : "name";
+	const entries: IndexEntry[] = [];
+
+	for (const item of payload) {
+		if (!item || typeof item !== "object") continue;
+		const record = item as Record<string, unknown>;
+		const name = record[nameKey];
+		if (typeof name !== "string" || name.length === 0) continue;
+		const description =
+			typeof record.desc === "string"
+				? record.desc
+				: Array.isArray(record.name) && typeof record.name[0] === "string"
+					? record.name[0]
+					: "";
+		entries.push({ name, description });
 	}
+
+	return entries;
 }
 
-function parseNames(stdout: string): string[] {
-	return stdout
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => /^[a-zA-Z0-9][a-zA-Z0-9+._@-]*$/.test(line));
-}
-
-/** Search formulae and casks. Returns either results or the first real error. */
-export function searchBrew(
-	options: BrewOptions,
+/** Match name and description, formulae before casks, with a bounded result set. */
+export function searchIndex(
+	index: PackageIndex,
 	query: string,
-): { packages: BrewPackage[]; error: string | null } {
-	const term = query.trim();
-	if (term.length === 0) return { packages: [], error: null };
+	options: BrewOptions,
+): BrewPackage[] {
+	const term = query.trim().toLowerCase();
+	if (term.length === 0) return [];
 
-	const packages: BrewPackage[] = [];
-	const seen = new Set<string>();
+	const find = (entries: IndexEntry[], kind: PackageKind): BrewPackage[] =>
+		entries
+			.filter(
+				(entry) =>
+					entry.name.toLowerCase().includes(term) ||
+					entry.description.toLowerCase().includes(term),
+			)
+			.map((entry) => ({ ...entry, kind }));
 
-	const collect = (kind: PackageKind, stdout: string) => {
-		for (const name of parseNames(stdout)) {
-			const key = `${kind}:${name}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			packages.push({ name, kind });
-		}
-	};
-
-	if (options.includeFormulae) {
-		const result = runBrew(options.brewPath, ["search", "--formula", term]);
-		if (!result.ok) return { packages: [], error: result.error };
-		collect("formula", result.stdout);
-	}
-
-	if (options.includeCasks) {
-		const result = runBrew(options.brewPath, ["search", "--cask", term]);
-		if (!result.ok && packages.length === 0) {
-			return { packages: [], error: result.error };
-		}
-		if (result.ok) collect("cask", result.stdout);
-	}
-
-	return { packages, error: null };
+	const results: BrewPackage[] = [];
+	if (options.includeFormulae) results.push(...find(index.formulae, "formula"));
+	if (options.includeCasks) results.push(...find(index.casks, "cask"));
+	return results.slice(0, MAX_RESULTS);
 }
 
 /** Install argv for a searched package. Never interpolates a shell string. */

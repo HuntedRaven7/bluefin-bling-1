@@ -57,20 +57,24 @@ function parseOci(text: string, runtime: "podman" | "docker"): Container[] {
 		.filter((container) => container.name.length > 0);
 }
 
-/** `distrobox list` prints a human table. Parse only its data rows. */
-function parseDistrobox(text: string): Container[] {
+/**
+ * `distrobox list` prints `ID | NAME | STATUS | IMAGE`. The ID is a hex
+ * container ID, not a row number, and the status sits before the image.
+ * Parse only data rows so the `ID` header is dropped.
+ */
+export function parseDistrobox(text: string): Container[] {
 	return text
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line.includes("|"))
 		.map((line) => line.split("|").map((part) => part.trim()))
-		.filter((parts) => parts.length >= 4 && /^\d+$/.test(parts[0]))
+		.filter((parts) => parts.length >= 4 && /^[0-9a-f]+$/i.test(parts[0]))
 		.map((parts) => {
-			const status = parts[3];
+			const status = parts[2];
 			return {
-				id: parts[1],
+				id: parts[0],
 				name: parts[1],
-				image: parts[2],
+				image: parts[3],
 				status,
 				state: /^(up|running)/i.test(status) ? "running" : "exited",
 				runtime: "distrobox" as const,

@@ -100,6 +100,13 @@
       "required": false
     },
     {
+      "name": "hearthApiKey",
+      "type": "password",
+      "title": "Hearth API key",
+      "description": "Used only for the Hearth route. Never reuse the OpenAI key for a third-party endpoint.",
+      "required": false
+    },
+    {
       "name": "openaiBaseUrl",
       "type": "textfield",
       "title": "OpenAI-compatible base URL",

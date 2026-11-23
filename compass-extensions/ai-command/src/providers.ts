@@ -7,6 +7,7 @@ export type ProviderPrefs = {
 	openaiApiKey?: string;
 	openrouterApiKey?: string;
 	anthropicApiKey?: string;
+	hearthApiKey?: string;
 	openaiBaseUrl?: string;
 	hearthBaseUrl?: string;
 	ollamaBaseUrl?: string;
@@ -42,7 +43,14 @@ export function resolveModel(
 	value: string | undefined,
 	prefs: ProviderPrefs,
 ): string {
-	return value?.trim() || prefs.defaultModel?.trim() || FALLBACK_MODELS[provider];
+	// A model name is provider-specific. Only apply the global default when the
+	// selected source is the default one; otherwise use that provider's fallback.
+	const useDefault = provider === resolveProvider(undefined, prefs);
+	return (
+		value?.trim() ||
+		(useDefault ? prefs.defaultModel?.trim() : "") ||
+		FALLBACK_MODELS[provider]
+	);
 }
 
 function endpoint(provider: Provider, prefs: ProviderPrefs): string {
@@ -63,8 +71,11 @@ function endpoint(provider: Provider, prefs: ProviderPrefs): string {
 function apiKey(provider: Provider, prefs: ProviderPrefs): string {
 	switch (provider) {
 		case "openai":
-		case "hearth":
 			return prefs.openaiApiKey || "";
+		case "hearth":
+			// Never reuse the OpenAI key: the Hearth base URL is user-supplied
+			// and may be a third-party or plain-text endpoint.
+			return prefs.hearthApiKey || "";
 		case "openrouter":
 			return prefs.openrouterApiKey || "";
 		case "anthropic":

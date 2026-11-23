@@ -8,8 +8,9 @@ import {
 	Toast,
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
-import { listContainers, type Container, type Runtime } from "./containers.js";
-import { launchInTerminal, type TerminalPrefs } from "./terminal.js";
+import { listContainers, type Container, type Runtime } from "./discovery.js";
+import { launchInTerminal } from "./terminal.js";
+import type { TerminalPrefs } from "./shell.js";
 
 type Preferences = TerminalPrefs & {
 	enablePodman: boolean;
@@ -67,7 +68,7 @@ export default function Containers() {
 			message: `${RUNTIME_LABELS[container.runtime]} · ${container.image}`,
 		});
 		try {
-			launchInTerminal(prefs, container);
+			await launchInTerminal(prefs, container);
 			await showToast({
 				style: Toast.Style.Success,
 				title: `Opened ${container.name} in a terminal`,

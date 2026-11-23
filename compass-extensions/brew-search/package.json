@@ -24,7 +24,7 @@
       "name": "brewPath",
       "type": "textfield",
       "title": "Homebrew executable",
-      "description": "Path to brew on the host. Bluefin and other atomic images usually use Linuxbrew under /home/linuxbrew.",
+      "description": "Path to brew on the host, used for installs. Searches use the formulae.brew.sh API because the worker cannot execute Linuxbrew. Bluefin usually uses /home/linuxbrew/.linuxbrew/bin/brew.",
       "required": false,
       "default": "/home/linuxbrew/.linuxbrew/bin/brew",
       "placeholder": "/home/linuxbrew/.linuxbrew/bin/brew"

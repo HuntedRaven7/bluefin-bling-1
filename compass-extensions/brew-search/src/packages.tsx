@@ -10,7 +10,13 @@ import {
 	Toast,
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
-import { installArgs, packageUrl, searchBrew, type BrewPackage } from "./brew.js";
+import {
+	installArgs,
+	packageUrl,
+	searchIndex,
+	type BrewPackage,
+} from "./brew.js";
+import { loadPackageIndex } from "./index.js";
 
 type Preferences = {
 	brewPath: string;
@@ -34,23 +40,35 @@ export default function Packages() {
 			return;
 		}
 
+		let stale = false;
 		setIsLoading(true);
 		const timer = setTimeout(() => {
-			const result = searchBrew(
-				{
-					brewPath: prefs.brewPath || "/home/linuxbrew/.linuxbrew/bin/brew",
-					includeFormulae: prefs.includeFormulae !== false,
-					includeCasks: prefs.includeCasks !== false,
-				},
-				term,
-			);
-			setPackages(result.packages);
-			setError(result.error);
-			setIsLoading(false);
+			loadPackageIndex()
+				.then((index) => {
+					if (stale) return;
+					setPackages(
+						searchIndex(index, term, {
+							includeFormulae: prefs.includeFormulae !== false,
+							includeCasks: prefs.includeCasks !== false,
+						}),
+					);
+					setError(null);
+				})
+				.catch((cause: unknown) => {
+					if (stale) return;
+					setError(cause instanceof Error ? cause.message : String(cause));
+					setPackages([]);
+				})
+				.finally(() => {
+					if (!stale) setIsLoading(false);
+				});
 		}, 200);
 
-		return () => clearTimeout(timer);
-	}, [query, prefs.brewPath, prefs.includeFormulae, prefs.includeCasks]);
+		return () => {
+			stale = true;
+			clearTimeout(timer);
+		};
+	}, [query, prefs.includeFormulae, prefs.includeCasks]);
 
 	async function install(pkg: BrewPackage) {
 		await showToast({
@@ -60,7 +78,7 @@ export default function Packages() {
 		});
 		try {
 			await runInTerminal(
-				[prefs.brewPath || "/home/linuxbrew/.linuxbrew/bin/brew", ...installArgs(pkg)],
+				[prefs.brewPath || "brew", ...installArgs(pkg)],
 				{ hold: true, title: `brew install ${pkg.name}` },
 			);
 			await showToast({
@@ -86,13 +104,13 @@ export default function Packages() {
 				<List.Item
 					key="hint"
 					title="Type to search Homebrew"
-					subtitle="Searches formulae and casks on the host, then installs with brew install."
+					subtitle="Searches formulae and casks on formulae.brew.sh, then installs with brew install."
 					icon="🍺"
 				/>
 			) : error ? (
 				<List.Item
 					key="error"
-					title="Homebrew search failed"
+					title="Homebrew index unavailable"
 					subtitle={error}
 					icon="⚠️"
 				/>
@@ -109,7 +127,10 @@ export default function Packages() {
 						<List.Item
 							key={`${pkg.kind}:${pkg.name}`}
 							title={pkg.name}
-							subtitle={pkg.kind === "cask" ? "Cask · desktop app" : "Formula · CLI"}
+							subtitle={
+								pkg.description ||
+								(pkg.kind === "cask" ? "Desktop app" : "Command-line formula")
+							}
 							icon={pkg.kind === "cask" ? "📦" : "⚙️"}
 							keywords={[pkg.kind, "brew", "homebrew"]}
 							actions={
