@@ -23,7 +23,10 @@ export async function runHostScript(
 	const output = join(environment.supportPath, `host-${id}.out`);
 	const done = join(environment.supportPath, `host-${id}.done`);
 
-	const body = `${build(output)}\nprintf 'done' > ${shellQuote(done)}`;
+	// Bound the host work below the 10s poll deadline. Without this, a slow
+	// first podman start could outlive the timeout and recreate the output and
+	// done files after `finally` removed them, leaking temporary files.
+	const body = `timeout 8 /bin/sh -c ${shellQuote(build(output))}\nprintf 'done' > ${shellQuote(done)}`;
 	await writeFile(
 		script,
 		`#!/bin/sh\nrm -f "$0"\nsetsid -f /bin/sh -c ${shellQuote(body)} >/dev/null 2>&1\n`,

@@ -16,7 +16,8 @@ import {
  * WAYLAND_DISPLAY or XDG_RUNTIME_DIR, so a terminal started there cannot reach
  * the session. The wrapper script is written to the extension's writable
  * support directory and executed by the engine, which has the session
- * environment; `exec` replaces the temporary terminal with the chosen one.
+ * environment; the script deletes itself and detaches the chosen terminal
+ * with `setsid -f`, so the temporary terminal closes immediately.
  */
 export async function launchInTerminal(
 	prefs: TerminalPrefs,

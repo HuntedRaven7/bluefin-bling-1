@@ -123,8 +123,10 @@ Each TypeScript worker runs behind Landlock:
   `spawnSync` from a worker.** `container-terminal` runs discovery on the host
   instead: it writes a self-deleting script into `environment.supportPath`,
   hands it to `runInTerminal`, and the detached process writes tagged output to
-  a file that the extension polls for. Keep the script builder and output
-  parser pure so they can be tested without an engine.
+  a file that the extension polls for. Bound the detached work with `timeout`
+  below the polling deadline, and always write the completion marker, so a
+  slow command cannot recreate temporary files after cleanup. Keep the script
+  builder and output parser pure so they can be tested without an engine.
 - GUI work must go through the engine APIs (`open`, `runInTerminal`,
   window-management), never a directly spawned process.
 - Syscalls are filtered and memory is capped; avoid native addons and large
