@@ -119,10 +119,12 @@ Each TypeScript worker runs behind Landlock:
 - No session sockets or session environment are handed to the worker: D-Bus,
   Wayland, `DISPLAY`, `XDG_RUNTIME_DIR` and `COMPASS_SOCKET` are withheld.
   Rootless `podman`/`distrobox` need the runtime dir and container storage under
-  `$HOME`, so their CLI output from inside a worker is not reliable. Run host
-  tools through `runInTerminal` and read their output from a file in the
-  extension's support directory, or verify in a real Compass session before
-  relying on `spawnSync`.
+  `$HOME`, which the worker cannot read. **Do not call their CLIs with
+  `spawnSync` from a worker.** `container-terminal` runs discovery on the host
+  instead: it writes a self-deleting script into `environment.supportPath`,
+  hands it to `runInTerminal`, and the detached process writes tagged output to
+  a file that the extension polls for. Keep the script builder and output
+  parser pure so they can be tested without an engine.
 - GUI work must go through the engine APIs (`open`, `runInTerminal`,
   window-management), never a directly spawned process.
 - Syscalls are filtered and memory is capped; avoid native addons and large
@@ -142,17 +144,21 @@ expecting a local extension to gain permissions; use `runInTerminal` instead.
 
 - **Terminal choice is a preference.** Keep the terminal launch template in a
   single pure module. `{command}` is replaced by a fully shell-quoted command,
-  which is written into a `exec …` wrapper script and handed to
-  `runInTerminal`. A compound shell command (for example `start && exec`) must
-  itself be quoted as one argument, otherwise the outer shell splits on `&&`.
-  Never build a command string from unquoted container or package names.
+  written into a wrapper script and handed to `runInTerminal`. The script must
+  delete itself (`rm -f "$0"`) and detach the chosen terminal with `setsid -f`;
+  plain `exec` only replaces the shell inside the helper terminal window and
+  leaves an extra blank window behind. A compound command (for example
+  `start && exec`) must itself be quoted as one argument, otherwise the outer
+  shell splits on `&&`. Never build a command string from unquoted container or
+  package names.
 - **Install commands go through `runInTerminal`,** so the user sees progress
   and can interact with prompts. The install argv is an array; no shell string
   interpolation.
 - **Search does not depend on host CLIs.** `brew-search` queries
   formulae.brew.sh and caches a compact index with `Cache`; that works inside
-  the sandbox and fixes cask-only searches. Native container runtimes are
-  probed with `--version`, and a missing or failing one is skipped.
+  the sandbox and fixes cask-only searches. Container runtimes are discovered
+  on the host with `command -v` inside the helper script, and a missing or
+  failing runtime is skipped.
 - **Keep pure logic in separate modules.** Parsers and command builders should
   not import `@vicinae/api`, so they can be exercised by the Node harnesses in
   `tests/` without a running engine.

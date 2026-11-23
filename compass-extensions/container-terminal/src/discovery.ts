@@ -1,5 +1,3 @@
-import { spawnSync } from "node:child_process";
-
 export type Runtime = "podman" | "docker" | "distrobox";
 
 export type Container = {
@@ -21,22 +19,45 @@ export type DiscoveryOptions = {
 // Tab separated so image names with spaces cannot shift columns.
 const OCI_FORMAT = "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.State}}";
 
-function output(bin: string, args: string[]): string | null {
-	try {
-		const result = spawnSync(bin, args, {
-			encoding: "utf8",
-			timeout: 5000,
-			maxBuffer: 4 * 1024 * 1024,
-		});
-		if (result.error || result.status !== 0) return null;
-		return result.stdout ?? "";
-	} catch {
-		return null;
-	}
+// Local copy so this module stays self-contained for the Node harness, which
+// cannot resolve a `.js` value specifier from a TypeScript file.
+function quote(word: string): string {
+	return `'${word.replace(/'/g, "'\\''")}'`;
 }
 
-function isAvailable(bin: string): boolean {
-	return output(bin, ["--version"]) !== null;
+/**
+ * Shell body that writes tagged sections to `outputPath`. It runs on the host
+ * through the engine, where the runtime dir, container storage and PATH are
+ * available; the worker's Landlock policy does not grant any of those.
+ */
+export function buildDiscoveryScript(
+	outputPath: string,
+	options: DiscoveryOptions,
+): string {
+	const out = quote(outputPath);
+	const filter = options.includeStopped ? "" : " --filter status=running";
+	const lines: string[] = [`: > ${out}`];
+
+	if (options.enablePodman) {
+		lines.push(`printf '==podman==\\n' >> ${out}`);
+		lines.push(
+			`command -v podman >/dev/null 2>&1 && podman ps${filter} --format ${quote(OCI_FORMAT)} >> ${out} 2>/dev/null || true`,
+		);
+	}
+	if (options.enableDocker) {
+		lines.push(`printf '==docker==\\n' >> ${out}`);
+		lines.push(
+			`command -v docker >/dev/null 2>&1 && docker ps${filter} --format ${quote(OCI_FORMAT)} >> ${out} 2>/dev/null || true`,
+		);
+	}
+	if (options.enableDistrobox) {
+		lines.push(`printf '==distrobox==\\n' >> ${out}`);
+		lines.push(
+			`command -v distrobox >/dev/null 2>&1 && distrobox list --no-color >> ${out} 2>/dev/null || true`,
+		);
+	}
+
+	return lines.join("\n");
 }
 
 function parseOci(text: string, runtime: "podman" | "docker"): Container[] {
@@ -82,14 +103,28 @@ export function parseDistrobox(text: string): Container[] {
 		});
 }
 
-/**
- * Discover containers from every enabled runtime that is actually installed.
- * A missing or failing runtime is skipped rather than failing the whole search.
- */
-export function listContainers(options: DiscoveryOptions): Container[] {
+/** Split the tagged output and parse each runtime's section. */
+export function parseDiscoveryOutput(
+	text: string,
+	options: DiscoveryOptions,
+): Container[] {
+	const sections: Record<string, string> = {
+		podman: "",
+		docker: "",
+		distrobox: "",
+	};
+	let current = "";
+	for (const line of text.split("\n")) {
+		const marker = /^==(podman|docker|distrobox)==$/.exec(line.trim());
+		if (marker) {
+			current = marker[1];
+			continue;
+		}
+		if (current) sections[current] += `${line}\n`;
+	}
+
 	const found: Container[] = [];
 	const seen = new Set<string>();
-
 	const add = (containers: Container[]) => {
 		for (const container of containers) {
 			if (!options.includeStopped && container.state !== "running") continue;
@@ -100,26 +135,9 @@ export function listContainers(options: DiscoveryOptions): Container[] {
 		}
 	};
 
-	if (options.enablePodman && isAvailable("podman")) {
-		const args = ["ps"];
-		if (!options.includeStopped) args.push("--filter", "status=running");
-		args.push("--format", OCI_FORMAT);
-		const text = output("podman", args);
-		if (text !== null) add(parseOci(text, "podman"));
-	}
-
-	if (options.enableDocker && isAvailable("docker")) {
-		const args = ["ps"];
-		if (!options.includeStopped) args.push("--filter", "status=running");
-		args.push("--format", OCI_FORMAT);
-		const text = output("docker", args);
-		if (text !== null) add(parseOci(text, "docker"));
-	}
-
-	if (options.enableDistrobox && isAvailable("distrobox")) {
-		const text = output("distrobox", ["list", "--no-color"]);
-		if (text !== null) add(parseDistrobox(text));
-	}
+	if (options.enablePodman) add(parseOci(sections.podman, "podman"));
+	if (options.enableDocker) add(parseOci(sections.docker, "docker"));
+	if (options.enableDistrobox) add(parseDistrobox(sections.distrobox));
 
 	return found.sort(
 		(a, b) =>

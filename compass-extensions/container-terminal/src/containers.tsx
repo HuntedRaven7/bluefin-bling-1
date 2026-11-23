@@ -8,7 +8,8 @@ import {
 	Toast,
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
-import { listContainers, type Container, type Runtime } from "./discovery.js";
+import { type Container, type Runtime } from "./discovery.js";
+import { listContainers } from "./host-discovery.js";
 import { launchInTerminal } from "./terminal.js";
 import type { TerminalPrefs } from "./shell.js";
 
@@ -37,11 +38,11 @@ export default function Containers() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	function refresh() {
+	async function refresh() {
 		setIsLoading(true);
 		try {
 			setContainers(
-				listContainers({
+				await listContainers({
 					enablePodman: prefs.enablePodman !== false,
 					enableDocker: prefs.enableDocker !== false,
 					enableDistrobox: prefs.enableDistrobox !== false,
@@ -58,7 +59,7 @@ export default function Containers() {
 	}
 
 	useEffect(() => {
-		refresh();
+		void refresh();
 	}, []);
 
 	async function open(container: Container) {

@@ -1,7 +1,11 @@
 // Exercises the pure modules behind the Compass extensions. No engine is
 // needed: these modules deliberately avoid importing @vicinae/api.
 import { parseIndex, searchIndex } from "../compass-extensions/brew-search/src/brew.ts";
-import { parseDistrobox } from "../compass-extensions/container-terminal/src/discovery.ts";
+import {
+	buildDiscoveryScript,
+	parseDistrobox,
+	parseDiscoveryOutput,
+} from "../compass-extensions/container-terminal/src/discovery.ts";
 import {
 	expandTemplate,
 	shellCommandFor,
@@ -20,6 +24,28 @@ const scenarios = {
 				"aabbccddeeff                           | old-box    | Created     | ubuntu:24.04",
 			].join("\n"),
 		);
+	},
+
+	"discovery-output"() {
+		const options = {
+			enablePodman: true,
+			enableDocker: true,
+			enableDistrobox: true,
+			includeStopped: false,
+		};
+		const text = [
+			"==podman==",
+			"abc123\tweb\tnginx\tUp 2 hours\trunning",
+			"dead00\told\tnginx\tExited 1 hour ago\texited",
+			"==docker==",
+			"==distrobox==",
+			"ID | NAME | STATUS | IMAGE",
+			"3f2a1b9c7d8e | fedora-box | Up 2 hours | quay.io/fedora/fedora-toolbox:41",
+		].join("\n");
+		return {
+			containers: parseDiscoveryOutput(text, options),
+			script: buildDiscoveryScript("/tmp/out", options),
+		};
 	},
 
 	"stopped-container"() {

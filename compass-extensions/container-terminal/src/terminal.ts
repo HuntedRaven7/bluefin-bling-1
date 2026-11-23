@@ -29,7 +29,13 @@ export async function launchInTerminal(
 	);
 	const scriptPath = join(environment.supportPath, `open-${randomUUID()}.sh`);
 
-	await writeFile(scriptPath, `#!/bin/sh\nexec ${full}\n`, { mode: 0o700 });
+	// Detach the chosen terminal so the helper window closes immediately, and
+	// remove the wrapper so launches do not accumulate files in supportPath.
+	await writeFile(
+		scriptPath,
+		`#!/bin/sh\nrm -f "$0"\nsetsid -f ${full} >/dev/null 2>&1\n`,
+		{ mode: 0o700 },
+	);
 
 	// A failure here means the engine could not start the temporary terminal;
 	// it rejects so the caller can show a failure toast instead of a success.

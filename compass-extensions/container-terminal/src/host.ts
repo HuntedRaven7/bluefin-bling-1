@@ -1,0 +1,51 @@
+import { randomUUID } from "node:crypto";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { environment, runInTerminal } from "@vicinae/api";
+import { shellQuote } from "./shell.js";
+
+const TIMEOUT_MS = 10_000;
+const POLL_MS = 100;
+
+/**
+ * Run a shell body on the host, outside the worker's Landlock policy, and
+ * return its stdout. The helper terminal exits at once: the script deletes
+ * itself and detaches the real work with `setsid -f`. The detached process
+ * inherits the engine's full environment and writes its result into the
+ * extension's writable support directory.
+ */
+export async function runHostScript(
+	build: (outputPath: string) => string,
+	title: string,
+): Promise<string> {
+	const id = randomUUID();
+	const script = join(environment.supportPath, `host-${id}.sh`);
+	const output = join(environment.supportPath, `host-${id}.out`);
+	const done = join(environment.supportPath, `host-${id}.done`);
+
+	const body = `${build(output)}\nprintf 'done' > ${shellQuote(done)}`;
+	await writeFile(
+		script,
+		`#!/bin/sh\nrm -f "$0"\nsetsid -f /bin/sh -c ${shellQuote(body)} >/dev/null 2>&1\n`,
+		{ mode: 0o700 },
+	);
+
+	try {
+		await runInTerminal([script], { hold: false, title });
+		const deadline = Date.now() + TIMEOUT_MS;
+		while (Date.now() < deadline) {
+			try {
+				await readFile(done, "utf8");
+				return await readFile(output, "utf8");
+			} catch {
+				// The detached command has not finished yet.
+			}
+			await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+		}
+		throw new Error(`Timed out waiting for ${title.toLowerCase()}`);
+	} finally {
+		await Promise.all(
+			[script, output, done].map((path) => rm(path, { force: true })),
+		);
+	}
+}

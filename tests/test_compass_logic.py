@@ -2,7 +2,7 @@
 
 The engine-specific code cannot run in this repo, but the parsers, command
 builders and provider resolution are plain modules. These tests execute the
-shipped source through `tests/compass_logic_harness.mjs` so the review fixes are
+shipped source through `tests/compass_logic.mjs` so the review fixes are
 proved by behaviour rather than by reading source text.
 """
 
@@ -50,6 +50,18 @@ class TestCompassLogic(unittest.TestCase):
         self.assertEqual(containers[1]["state"], "exited")
         for container in containers:
             self.assertEqual(container["runtime"], "distrobox")
+
+    def test_engine_discovery_parses_tagged_sections_and_builds_a_host_script(self):
+        result = run_scenario("discovery-output")
+        names = [(c["runtime"], c["name"]) for c in result["containers"]]
+        self.assertEqual(
+            names, [("distrobox", "fedora-box"), ("podman", "web")]
+        )
+        script = result["script"]
+        self.assertIn("command -v podman", script)
+        self.assertIn("podman ps --filter status=running", script)
+        self.assertIn("command -v distrobox", script)
+        self.assertIn("distrobox list --no-color", script)
 
     def test_stopped_container_command_is_one_argument_to_the_terminal(self):
         result = run_scenario("stopped-container")
