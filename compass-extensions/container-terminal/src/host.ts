@@ -47,6 +47,12 @@ export async function runHostScript(
 				await new Promise((resolve) => setTimeout(resolve, POLL_MS));
 				continue;
 			}
+			if (status === "") {
+				// `> done` creates the file before printf writes the status;
+				// an empty marker is not a finished command. Poll again.
+				await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+				continue;
+			}
 			if (status === "124" || status === "137") {
 				throw new Error(`Timed out waiting for ${title.toLowerCase()}`);
 			}
